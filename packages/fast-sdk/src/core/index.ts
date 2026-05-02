@@ -1,9 +1,5 @@
 export { domainEncode, encode, getTokenId, hash, hashHex } from "./crypto/bcs";
-export {
-  buildSignedEnvelope,
-  signVersionedTransaction,
-  verifyVersionedTransactionSignature,
-} from "./crypto/envelope";
+export { buildSignedEnvelope } from "./crypto/envelope";
 export {
   getPublicKey,
   signMessage,
@@ -28,31 +24,28 @@ export {
   ValidatorGenericError,
 } from "./error/fastset";
 export {
-  JsonRpcProtocolError,
-  RpcError,
+  RestError,
+  RestTimeoutError,
   RpcTimeoutError,
 } from "./error/network";
 export {
   DatabaseError,
-  FaucetDisabledError,
-  FaucetThresholdExceededError,
-  FaucetThrottledError,
-  FaucetTxnFailedError,
   GeneralError,
   InvalidRequestError,
+  IpRateLimitedError,
+  NotFoundError,
   ProxyUnexpectedNonceError,
+  ServiceUnavailableError,
   TooManyCertificatesRequestedError,
+  UpstreamError,
   VerifierSigsInvalidError,
 } from "./error/proxy";
-export { parseRpcError } from "./network/error";
-export { rpcCallEffect } from "./network/rpc";
+export { parseRestError } from "./network/error";
+export { restCallEffect } from "./network/rest";
 export {
-  JsonRpcFastTransport,
-  type FastTransport,
-} from "./network/transport";
-export {
-  faucetDrip,
   getAccountInfo,
+  getEscrowJob,
+  getEscrowJobs,
   getPendingMultisigTransactions,
   getTokenInfo,
   getTransactionCertificates,
