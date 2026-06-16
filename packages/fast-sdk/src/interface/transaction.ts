@@ -1,6 +1,5 @@
 import type {
   BurnInputParams,
-  EscrowInputParams,
   ExternalClaimInputParams,
   MintInputParams,
   NetworkId,
@@ -16,21 +15,23 @@ import type {
   TransactionEnvelope,
   TransactionVersion,
 } from "@fastxyz/schema";
-import { getTransactionVersionConfig, LatestTransactionVersion } from "@fastxyz/schema";
+import { TransactionInput } from "@fastxyz/schema";
 import { Schema } from "effect";
-import { buildSignedEnvelope } from "../core/crypto/envelope";
+import { SignatureFromInput } from "@fastxyz/schema";
+import { verifyVersionedTransactionSignature } from "../core/crypto/envelope";
 import { run } from "../core/run";
-import type { Signer } from "./signer";
+import type { FastSigner } from "./signer";
+import { SigningError } from "../core/error/crypto";
 
 /** Options for constructing a {@link TransactionBuilder}. */
 export interface TransactionBuilderOptions {
   /** Target network (e.g. `"fast:testnet"`, `"fast:mainnet"`). */
   networkId: NetworkId;
-  /** Signer whose private key will sign the transaction. */
-  signer: Signer;
+  /** Signer that provides the sender public key and transaction signature. */
+  signer: FastSigner;
   /** Sender's next nonce, typically from {@link FastProvider.getAccountInfo}. */
   nonce: NonceInput;
-  /** BCS transaction version tag. Defaults to `"Release20260407"`. */
+  /** BCS transaction version tag. Defaults to `"Release20260319"`. */
   version?: TransactionVersion;
   /** Whether the transaction should be stored in archival nodes. Defaults to `false`. */
   archival?: boolean;
@@ -131,12 +132,6 @@ export class TransactionBuilder {
     return this;
   }
 
-  /** Add an escrow operation (CreateConfig, CreateJob, Submit, Reject, Complete). */
-  addEscrow(params: EscrowInputParams): this {
-    this.operations.push({ type: "Escrow", value: params });
-    return this;
-  }
-
   /** Update the nonce for the next {@link sign} call. */
   setNonce(nonce: NonceInput): this {
     this.options = { ...this.options, nonce };
@@ -144,7 +139,7 @@ export class TransactionBuilder {
   }
 
   /** Replace the signer for the next {@link sign} call. */
-  setSigner(signer: Signer): this {
+  setSigner(signer: FastSigner): this {
     this.options = { ...this.options, signer };
     return this;
   }
@@ -165,28 +160,42 @@ export class TransactionBuilder {
    * @returns A signed {@link TransactionEnvelope} ready for submission.
    */
   async sign(): Promise<TransactionEnvelope> {
-    if (this.operations.length === 0) {
-      throw new Error('TransactionBuilder.sign() requires at least one operation');
-    }
     const { signer, networkId, nonce, version, archival, feeToken } =
       this.options;
     const sender = await signer.getPublicKey();
-    const privateKey = await signer.getPrivateKey();
     const ops = this.operations;
-    const type: TransactionVersion = version ?? LatestTransactionVersion;
+    const claim =
+      ops.length === 1 ? ops[0]! : { type: "Batch" as const, value: ops };
 
-    const config = getTransactionVersionConfig(type);
-    const internal = Schema.decodeUnknownSync(config.inputSchema)({
+    const txInput = {
       networkId,
       sender,
       nonce,
       timestampNanos: BigInt(Date.now()) * 1_000_000n,
-      ...config.wrapOperations(ops),
+      claim,
       archival: archival ?? false,
       feeToken: feeToken ?? null,
-    });
-    const versioned = { type, value: internal };
+    };
 
-    return run(buildSignedEnvelope(privateKey, versioned as Parameters<typeof buildSignedEnvelope>[1]));
+    const internal = Schema.decodeUnknownSync(TransactionInput)(txInput);
+    const type: TransactionVersion = version ?? "Release20260319";
+    const versioned = { type, value: internal };
+    const rawSignature = await signer.signTransaction(versioned);
+    const matchesSigner = await run(
+      verifyVersionedTransactionSignature(rawSignature, versioned, sender),
+    );
+    if (!matchesSigner) {
+      throw new SigningError({
+        cause: new Error(
+          "Signer returned a transaction signature that does not match its public key.",
+        ),
+      });
+    }
+    const signature = Schema.decodeUnknownSync(SignatureFromInput)(rawSignature);
+
+    return {
+      transaction: versioned,
+      signature: { type: "Signature" as const, value: signature },
+    };
   }
 }

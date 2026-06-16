@@ -1,13 +1,9 @@
 import {
   type AccountInfoResponse,
-  type EscrowJobRecord,
-  type EscrowJobWithCerts,
+  FaucetDripInput,
+  type FaucetDripInputParams,
   GetAccountInfoInput,
   type GetAccountInfoInputParams,
-  GetEscrowJobInput,
-  type GetEscrowJobInputParams,
-  GetEscrowJobsInput,
-  type GetEscrowJobsInputParams,
   GetPendingMultisigInput,
   type GetPendingMultisigInputParams,
   GetTokenInfoInput,
@@ -22,40 +18,54 @@ import {
 import { Schema } from "effect";
 import * as proxy from "../core/proxy";
 import { run } from "../core/run";
+import {
+  JsonRpcFastTransport,
+  type FastTransport,
+} from "../core/network/transport";
 
 /** Options for constructing a {@link FastProvider}. */
 export interface ProviderOptions {
-  /** The base URL of the Fast proxy REST API. */
-  url: string;
+  /** The URL of the Fast proxy JSON-RPC endpoint. */
+  rpcUrl: string;
+  /** Optional transport override for browser wallets, tests, or custom clients. */
+  transport?: FastTransport;
 }
 
 /**
- * Typed REST provider for the Fast proxy API.
+ * Typed JSON-RPC provider for the Fast proxy API.
  *
- * Wraps the proxy's REST endpoints with schema validation on both
+ * Wraps the proxy's JSON-RPC methods with schema validation on both
  * inputs and outputs. All params are validated synchronously before
  * the network call; responses are decoded through Effect schemas.
  *
  * @example
  * ```ts
- * const provider = new FastProvider({ url: "https://proxy.fast.xyz" });
+ * const provider = new FastProvider({ rpcUrl: "https://proxy.fast.xyz" });
  * const account = await provider.getAccountInfo({
  *   address: publicKey,
  *   tokenBalancesFilter: null,
  *   stateKeyFilter: null,
+ *   certificateByNonce: null,
  * });
  * ```
  */
 export class FastProvider {
-  private readonly _url: string;
+  private readonly _rpcUrl: string;
+  private readonly _transport: FastTransport;
 
   constructor(opts: ProviderOptions) {
-    this._url = opts.url;
+    this._rpcUrl = opts.rpcUrl;
+    this._transport = opts.transport ?? new JsonRpcFastTransport();
   }
 
-  /** The proxy base URL this provider was constructed with. */
-  get url(): string {
-    return this._url;
+  /** The proxy RPC URL this provider was constructed with. */
+  get rpcUrl(): string {
+    return this._rpcUrl;
+  }
+
+  /** The transport used for all proxy requests. */
+  get transport(): FastTransport {
+    return this._transport;
   }
 
   /**
@@ -65,7 +75,13 @@ export class FastProvider {
   async submitTransaction(
     params: TransactionEnvelope,
   ): Promise<SubmitTransactionResult> {
-    return run(proxy.submitTransaction(this._url, params));
+    return run(proxy.submitTransaction(this._transport, this._rpcUrl, params));
+  }
+
+  /** Request a faucet drip for the given recipient. */
+  async faucetDrip(params: FaucetDripInputParams): Promise<void> {
+    const internal = Schema.decodeUnknownSync(FaucetDripInput)(params);
+    return run(proxy.faucetDrip(this._transport, this._rpcUrl, internal));
   }
 
   /**
@@ -76,7 +92,7 @@ export class FastProvider {
     params: GetAccountInfoInputParams,
   ): Promise<AccountInfoResponse> {
     const internal = Schema.decodeUnknownSync(GetAccountInfoInput)(params);
-    return run(proxy.getAccountInfo(this._url, internal));
+    return run(proxy.getAccountInfo(this._transport, this._rpcUrl, internal));
   }
 
   /** Fetch pending multisig transactions for the given address. */
@@ -84,7 +100,13 @@ export class FastProvider {
     params: GetPendingMultisigInputParams,
   ): Promise<readonly TransactionEnvelope[]> {
     const internal = Schema.decodeUnknownSync(GetPendingMultisigInput)(params);
-    return run(proxy.getPendingMultisigTransactions(this._url, internal));
+    return run(
+      proxy.getPendingMultisigTransactions(
+        this._transport,
+        this._rpcUrl,
+        internal,
+      ),
+    );
   }
 
   /** Fetch metadata for one or more tokens by their IDs. */
@@ -92,7 +114,7 @@ export class FastProvider {
     params: GetTokenInfoInputParams,
   ): Promise<TokenInfoResponse> {
     const internal = Schema.decodeUnknownSync(GetTokenInfoInput)(params);
-    return run(proxy.getTokenInfo(this._url, internal));
+    return run(proxy.getTokenInfo(this._transport, this._rpcUrl, internal));
   }
 
   /**
@@ -105,25 +127,12 @@ export class FastProvider {
     const internal = Schema.decodeUnknownSync(GetTransactionCertificatesInput)(
       params,
     );
-    return run(proxy.getTransactionCertificates(this._url, internal));
-  }
-
-  /** Fetch a single escrow job by ID, optionally including certificates. */
-  async getEscrowJob(
-    params: GetEscrowJobInputParams,
-  ): Promise<EscrowJobRecord | EscrowJobWithCerts> {
-    const internal = Schema.decodeUnknownSync(GetEscrowJobInput)(params);
-    return run(proxy.getEscrowJob(this._url, internal));
-  }
-
-  /**
-   * List escrow jobs filtered by role (client, provider, or evaluator).
-   * Optionally filter by status and include certificates.
-   */
-  async getEscrowJobs(
-    params: GetEscrowJobsInputParams,
-  ): Promise<readonly (EscrowJobRecord | EscrowJobWithCerts)[]> {
-    const internal = Schema.decodeUnknownSync(GetEscrowJobsInput)(params);
-    return run(proxy.getEscrowJobs(this._url, internal));
+    return run(
+      proxy.getTransactionCertificates(
+        this._transport,
+        this._rpcUrl,
+        internal,
+      ),
+    );
   }
 }
